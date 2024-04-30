@@ -5,6 +5,8 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
+set(CMAKE_CXX_FLAGS "-std=c++17 -Wfatal-errors")
+
 IF(APPLE)
     # Fix linking on 10.14+. See https://stackoverflow.com/questions/54068035
     LINK_DIRECTORIES(/usr/local/lib)
