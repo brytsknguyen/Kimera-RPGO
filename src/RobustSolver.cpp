@@ -5,18 +5,18 @@ author: Yun Chang, Luca Carlone
 
 #include "KimeraRPGO/RobustSolver.h"
 
-#include <chrono>
-#include <string>
-#include <unordered_map>
-#include <utility>
-#include <vector>
-
 #include <gtsam/inference/inferenceExceptions.h>
 #include <gtsam/nonlinear/DoglegOptimizer.h>
 #include <gtsam/nonlinear/GaussNewtonOptimizer.h>
 #include <gtsam/nonlinear/GncOptimizer.h>
 #include <gtsam/nonlinear/LevenbergMarquardtOptimizer.h>
 #include <gtsam/slam/dataset.h>
+
+#include <chrono>
+#include <string>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 #include "KimeraRPGO/Logger.h"
 #include "KimeraRPGO/outlier/Pcm.h"
@@ -41,24 +41,28 @@ RobustSolver::RobustSolver(const RobustSolverParams& params)
       outlier_removal_ =
           KimeraRPGO::make_unique<Pcm2D>(params.pcm_params,
                                          params.multirobot_align_method,
+                                         params.multirobot_align_gnc_prob,
                                          params.specialSymbols);
     } break;
     case OutlierRemovalMethod::PCM3D: {
       outlier_removal_ =
           KimeraRPGO::make_unique<Pcm3D>(params.pcm_params,
                                          params.multirobot_align_method,
+                                         params.multirobot_align_gnc_prob,
                                          params.specialSymbols);
     } break;
     case OutlierRemovalMethod::PCM_Simple2D: {
       outlier_removal_ =
           KimeraRPGO::make_unique<PcmSimple2D>(params.pcm_params,
                                                params.multirobot_align_method,
+                                               params.multirobot_align_gnc_prob,
                                                params.specialSymbols);
     } break;
     case OutlierRemovalMethod::PCM_Simple3D: {
       outlier_removal_ =
           KimeraRPGO::make_unique<PcmSimple3D>(params.pcm_params,
                                                params.multirobot_align_method,
+                                               params.multirobot_align_gnc_prob,
                                                params.specialSymbols);
     } break;
     default: {
@@ -162,17 +166,17 @@ void RobustSolver::optimize() {
       result = gnc_optimizer.optimize();
       gtsam::Vector gnc_all_weights = gnc_optimizer.getWeights();
       gnc_weights_ = gnc_all_weights.head(nfg_.size());
-      gnc_num_inliers_ = static_cast<size_t>(gnc_all_weights.sum()) -
-                         known_inlier_factor_indices.size() - temp_nfg_.size();
+      gnc_temp_weights_ = gnc_all_weights.tail(temp_nfg_.size());
+      gnc_num_inliers_ = static_cast<size_t>(gnc_weights_.sum()) -
+                         known_inlier_factor_indices.size();
       auto opt_stop_t = std::chrono::high_resolution_clock::now();
       auto opt_duration = std::chrono::duration_cast<std::chrono::milliseconds>(
           opt_stop_t - opt_start_t);
       if (debug_) {
-        log<INFO>(
-            "GNC optimize took %1% milliseconds. %2% loop closures with "
-            "%3% inliers. ") %
-            opt_duration.count() % outlier_removal_->getNumLCInliers() %
-            gnc_num_inliers_;
+        log<INFO>() << "GNC optimize took " << opt_duration.count()
+                    << " milliseconds. " << outlier_removal_->getNumLCInliers()
+                    << " loop closures with " << gnc_num_inliers_
+                    << " inliers.";
       }
     } else {
       auto opt_start_t = std::chrono::high_resolution_clock::now();
@@ -197,11 +201,10 @@ void RobustSolver::optimize() {
       auto opt_duration = std::chrono::duration_cast<std::chrono::milliseconds>(
           opt_stop_t - opt_start_t);
       if (debug_) {
-        log<INFO>(
-            "Optimize took %1% milliseconds. %2% loop closures with "
-            "%3% inliers. ") %
-            opt_duration.count() % outlier_removal_->getNumLC() %
-            getNumLCInliers();
+        log<INFO>() << "Optimize took " << opt_duration.count()
+                    << " milliseconds. " << outlier_removal_->getNumLC()
+                    << " loop closures with " << getNumLCInliers()
+                    << " inliers.";
       }
     }
   } else if (solver_type_ == Solver::GN) {
@@ -247,17 +250,17 @@ void RobustSolver::optimize() {
       result = gnc_optimizer.optimize();
       gtsam::Vector gnc_all_weights = gnc_optimizer.getWeights();
       gnc_weights_ = gnc_all_weights.head(nfg_.size());
-      gnc_num_inliers_ = static_cast<size_t>(gnc_all_weights.sum()) -
+      gnc_temp_weights_ = gnc_all_weights.tail(temp_nfg_.size());
+      gnc_num_inliers_ = static_cast<size_t>(gnc_weights_.sum()) -
                          known_inlier_factor_indices.size();
       auto opt_stop_t = std::chrono::high_resolution_clock::now();
       auto opt_duration = std::chrono::duration_cast<std::chrono::milliseconds>(
           opt_stop_t - opt_start_t);
       if (debug_) {
-        log<INFO>(
-            "GNC optimize took %1% milliseconds. %2% loop closures with "
-            "%3% inliers. ") %
-            opt_duration.count() % outlier_removal_->getNumLCInliers() %
-            gnc_num_inliers_;
+        log<INFO>() << "GNC optimize took " << opt_duration.count()
+                    << " milliseconds. " << outlier_removal_->getNumLCInliers()
+                    << " loop closures with " << gnc_num_inliers_
+                    << " inliers.";
       }
     } else {
       result = gtsam::GaussNewtonOptimizer(full_nfg, full_values, gnParams)
@@ -317,7 +320,7 @@ void RobustSolver::update(const gtsam::NonlinearFactorGraph& factors,
     do_optimize = addAndCheckIfOptimize(factors, values);
   }
 
-  if (do_optimize & optimize_graph) optimize();  // optimize once after loading
+  if (do_optimize && optimize_graph) optimize();  // optimize once after loading
 
   // Stop timer and save
   auto stop = std::chrono::high_resolution_clock::now();
